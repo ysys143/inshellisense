@@ -40,7 +40,6 @@ const aiSuggestion = (name: string, insertValue: string | undefined): Suggestion
   priority: 100,
   type: "special",
   insertValue,
-  description: "AI",
 });
 
 export class SuggestionManager {
@@ -105,31 +104,37 @@ export class SuggestionManager {
     return renderBox(truncateMultilineText(description, descriptionWidth - borderWidth, descriptionHeight), descriptionWidth);
   }
 
-  private _renderSuggestions(suggestions: Suggestion[], activeSuggestionIdx: number) {
+  private _renderSuggestions(suggestions: Suggestion[], activeSuggestionIdx: number, width: number = suggestionWidth) {
     return renderBox(
       suggestions.map((suggestion, idx) => {
         const suggestionText = `${suggestion.icon} ${suggestion.name}`;
-        const truncatedSuggestion = truncateText(suggestionText, suggestionWidth - 2);
+        const truncatedSuggestion = truncateText(suggestionText, width - 2);
         return idx == activeSuggestionIdx ? chalk.bgHex(activeSuggestionBackgroundColor)(truncatedSuggestion) : truncatedSuggestion;
       }),
-      suggestionWidth,
+      width,
     );
   }
 
-  private _calculatePadding(description: string): { padding: number; swapDescription: boolean } {
+  private _calculatePadding(description: string, width: number = suggestionWidth): { padding: number; swapDescription: boolean } {
     const wrappedPadding = this.#term.getCursorState().cursorX % this.#term.cols;
-    const maxPadding = description.length !== 0 ? this.#term.cols - suggestionWidth - descriptionWidth : this.#term.cols - suggestionWidth;
+    const maxPadding = description.length !== 0 ? this.#term.cols - width - descriptionWidth : this.#term.cols - width;
     const swapDescription = wrappedPadding > maxPadding && description.length !== 0;
     const swappedPadding = swapDescription ? Math.max(wrappedPadding - descriptionWidth, 0) : wrappedPadding;
     const padding = Math.min(Math.min(wrappedPadding, swappedPadding), maxPadding);
     return { padding, swapDescription };
   }
 
-  private _calculateRowPadding(padding: number, swapDescription: boolean, suggestionContent?: string, descriptionContent?: string): number {
+  private _calculateRowPadding(
+    padding: number,
+    swapDescription: boolean,
+    suggestionContent?: string,
+    descriptionContent?: string,
+    width: number = suggestionWidth,
+  ): number {
     if (swapDescription) {
       return descriptionContent == null ? padding + descriptionWidth : padding;
     }
-    return suggestionContent == null ? padding + suggestionWidth : padding;
+    return suggestionContent == null ? padding + width : padding;
   }
 
   async exec(): Promise<void> {
@@ -147,7 +152,12 @@ export class SuggestionManager {
     const pagedSuggestions = suggestions.filter((_, idx) => idx < page * maxSuggestions && idx >= (page - 1) * maxSuggestions);
     const activePagedSuggestionIndex = this.#activeSuggestionIdx % maxSuggestions;
     const activeDescription = pagedSuggestions.at(activePagedSuggestionIndex)?.description || argumentDescription || "";
-    const { swapDescription, padding } = this._calculatePadding(activeDescription);
+    // AI results are a single, often short command -> size the box to its content
+    // instead of the fixed suggestionWidth (which suits multi-item spec lists).
+    const sw = this.#aiActive
+      ? Math.min(suggestionWidth, Math.max(0, ...pagedSuggestions.map((s) => wcswidth(`${s.icon} ${s.name}`))) + borderWidth)
+      : suggestionWidth;
+    const { swapDescription, padding } = this._calculatePadding(activeDescription, sw);
 
     if (suggestions.length <= this.#activeSuggestionIdx) {
       this.#activeSuggestionIdx = Math.max(suggestions.length - 1, 0);
@@ -160,7 +170,7 @@ export class SuggestionManager {
       return [];
     }
     const descriptionUI = this._renderDescription(activeDescription);
-    const suggestionUI = this._renderSuggestions(pagedSuggestions, activePagedSuggestionIndex);
+    const suggestionUI = this._renderSuggestions(pagedSuggestions, activePagedSuggestionIndex, sw);
     const ui = [];
     const maxRows = Math.max(descriptionUI.length, suggestionUI.length);
     for (let i = 0; i < maxRows; i++) {
@@ -170,11 +180,11 @@ export class SuggestionManager {
           : [suggestionUI[i], descriptionUI[i]];
 
       const data = swapDescription ? (descriptionUIRow ?? "") + (suggestionUIRow ?? "") : (suggestionUIRow ?? "") + (descriptionUIRow ?? "");
-      const rowPadding = this._calculateRowPadding(padding, swapDescription, suggestionUIRow, descriptionUIRow);
+      const rowPadding = this._calculateRowPadding(padding, swapDescription, suggestionUIRow, descriptionUIRow, sw);
 
       ui.push({
         startX: rowPadding,
-        length: (suggestionUIRow == null ? 0 : suggestionWidth) + (descriptionUIRow == null ? 0 : descriptionWidth),
+        length: (suggestionUIRow == null ? 0 : sw) + (descriptionUIRow == null ? 0 : descriptionWidth),
         data: data,
       });
     }
