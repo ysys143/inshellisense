@@ -1,13 +1,12 @@
 {
-  "name": "@microsoft/inshellisense",
+  "name": "more-inshellisense",
   "version": "0.0.1",
-  "description": "IDE style command line auto complete",
+  "description": "IDE-style shell autocomplete (fork of inshellisense) with AI natural-language command generation",
   "type": "module",
   "engines": {
     "node": ">=18.0 <23.0.0"
   },
   "bin": {
-    "inshellisense": "./build/index.js",
     "is": "./build/index.js"
   },
   "files": [
@@ -30,16 +29,22 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/microsoft/inshellisense.git"
+    "url": "git+https://github.com/ysys143/more-inshellisense.git"
   },
   "author": {
-    "name": "Microsoft Corporation"
+    "name": "Jaesol Shin"
   },
+  "contributors": [
+    {
+      "name": "Microsoft Corporation",
+      "url": "https://github.com/microsoft/inshellisense"
+    }
+  ],
   "license": "MIT",
   "bugs": {
-    "url": "https://github.com/microsoft/inshellisense/issues"
+    "url": "https://github.com/ysys143/more-inshellisense/issues"
   },
-  "homepage": "https://github.com/microsoft/inshellisense#readme",
+  "homepage": "https://github.com/ysys143/more-inshellisense#readme",
   "dependencies": {
     "@withfig/autocomplete": "2.675.0",
     "@xterm/addon-unicode11": "^0.9.0",

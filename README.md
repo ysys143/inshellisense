@@ -1,173 +1,100 @@
-# inshellisense
+# more-inshellisense
 
-`inshellisense` provides IDE style autocomplete for shells. It's a terminal native runtime for [autocomplete](https://github.com/withfig/autocomplete) which has support for 600+ command line tools. `inshellisense` supports Windows, Linux, & macOS.
+A fork of [inshellisense](https://github.com/microsoft/inshellisense) that adds **AI natural-language command generation** on top of its IDE-style shell autocomplete.
 
-<p align="center"><img alt="demo of inshellisense working" src="/docs/demo.gif"/></p>
+Type a command normally and you get spec-based completions for 600+ CLIs (the original inshellisense engine). Or type what you *want* in plain language — English, Korean, or even a bare tool/domain name — press **Ctrl+G**, and a local or cloud LLM turns it into the actual command, shown right in the suggestion box.
 
-## Getting Started
+```
+> 현재 컴퓨터 public ip
+  +---------------------+
+  | * curl ifconfig.me  |
+  +---------------------+
+  (press Ctrl+G, then Tab or Enter to accept)
+```
 
-### Installation
+## What this fork adds
 
-**npm (recommended)**
+- **AI command generation (Ctrl+G)** — natural language or a malformed command becomes a real shell command. Accept with **Tab** or **Enter** (the natural-language line is replaced, not run).
+- **Pluggable LLM providers** — local [ollama](https://ollama.com) (no API key, fully offline) or cloud. One OpenAI-compatible adapter covers ollama / GLM / Kimi / Alibaba / mlx; Gemini has a native adapter.
+- **Platform-aware prompts** — the OS/arch/shell context is injected so commands respect BSD vs GNU differences.
+
+Everything else is the original inshellisense: spec-based autocomplete, PTY wrapping, OSC shell integration, and support for bash, zsh, fish, pwsh, xonsh, and nushell across macOS, Linux, and Windows.
+
+## Install
+
 ```shell
-npm install -g @microsoft/inshellisense
+npm install -g more-inshellisense
 is init
 ```
-**homebrew (macOS/linux)**
-```shell
-brew tap microsoft/inshellisense https://github.com/microsoft/inshellisense
-brew install inshellisense
-is init
-```
 
-### Updating
+Run `is doctor` to verify the install, then `is` to start a session.
+
+## Usage
+
+Start a session (your shell prompt is preserved):
 
 ```shell
-npm install -g @microsoft/inshellisense # OR brew upgrade inshellisense
-is reinit
+is
 ```
 
-### Quickstart
+### Spec autocomplete (from inshellisense)
 
-After completing the installation, run `is doctor` to verify your installation was successful. You can run `is` to start the autocomplete session for your desired shell. Additionally, inshellisense is also aliased under `inshellisense` after installation.
+Type a command; suggestions appear as you go.
 
-### Shell Plugin
+| Action | Key |
+| --- | --- |
+| Accept suggestion | Tab |
+| Next / previous | Down / Up |
+| Dismiss | Esc |
 
-If you'd like to automatically start inshellisense when you open your shell, run the respective command for your shell. After running the command, inshellisense will automatically open when you start any new shell session:
+### AI command generation (this fork)
+
+Type what you want in natural language, then:
+
+| Action | Key |
+| --- | --- |
+| Generate command from the current line | Ctrl+G |
+| Accept the AI suggestion | Tab or Enter |
+
+The AI suggestion replaces the natural-language line with the command; press Enter again to run it.
+
+### Shell plugin (auto-start)
 
 ```shell
-# bash
-is init bash >> ~/.bashrc
-
-# zsh
-is init zsh >> ~/.zshrc
-
-# fish
-is init fish >> ~/.config/fish/config.fish
-
-# pwsh
-is init pwsh | Add-Content $profile
-
-# powershell
-is init powershell | Add-Content $profile
-
-# xonsh
-is init xonsh >> ~/.xonshrc
-
-# nushell
-is init nu | save $nu.env-path --append
+is init zsh >> ~/.zshrc   # bash/fish/etc. analogous
 ```
 
-> [!NOTE]  
-> When updating your shell configuration in the future, make sure the inshellisense plugin is the last command in the file. Including commands after it may break the configuration (ex. initializing your shell plugin manager after the inshellisense plugin)
+## AI configuration
 
-### Usage
-
-| Action                                | Command | Description                                      |
-| ------------------------------------- | ------- | ------------------------------------------------ |
-| Start                                 | `is`    | Start inshellisense session on the current shell |
-| Stop                                  | `exit`  | Stop inshellisense session on the current shell  |
-| Check If Inside Inshellisense Session | `is -c` | Check if shell inside inshellisense session      |
-
-#### Keybindings
-
-All other keys are passed through to the shell. The keybindings below are only captured when the inshellisense suggestions are visible, otherwise they are passed through to the shell as well. These can be customized in the [config](#configuration).
-
-| Action                    | Keybinding     |
-| ------------------------- | -------------- |
-| Accept Current Suggestion | <kbd>tab</kbd> |
-| View Next Suggestion      | <kbd>↓</kbd>   |
-| View Previous Suggestion  | <kbd>↑</kbd>   |
-| Dismiss Suggestions       | <kbd>esc</kbd> |
-
-## Integrations
-
-inshellisense supports the following shells:
-
-- [bash](https://www.gnu.org/software/bash/)
-- [zsh](https://www.zsh.org/)
-- [fish](https://github.com/fish-shell/fish-shell)
-- [pwsh](https://github.com/PowerShell/PowerShell)
-- [powershell](https://learn.microsoft.com/en-us/powershell/scripting/windows-powershell/starting-windows-powershell) (Windows Powershell)
-- [cmd](https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/cmd) _(experimental)_
-- [xonsh](https://xon.sh/)
-- [nushell](https://www.nushell.sh/)
-
-## Configuration
-
-All configuration is done through a [toml](https://toml.io/) file. You can create this file at `~/.inshellisenserc` or, for XDG compliance, at `~/.config/inshellisense/rc.toml`. The [JSON schema](https://json-schema.org/) for the configuration file can be found [here](https://github.com/microsoft/inshellisense/blob/main/src/utils/config.ts).
-
-### Keybindings
-
-You can customize the keybindings for inshellisense by adding a `bindings` section to your config file. The following is the default configuration for the [keybindings](#keybindings):
+Configure in `~/.inshellisenserc` (or `~/.config/inshellisense/rc.toml`):
 
 ```toml
-[bindings.acceptSuggestion]
-key = "tab"
-# shift and ctrl are optional and default to false
-shift = false
-ctrl = false
+[ai]
+enabled = true
+provider = "ollama"   # "ollama" (local) or "gemini" (cloud)
+timeoutMs = 20000
 
-[bindings.nextSuggestion]
-key = "down"
+[ai.providers.ollama]
+baseUrl = "http://localhost:11434/v1"
+model = "gemma4:e2b"
 
-[bindings.previousSuggestion]
-key = "up"
-
-[bindings.dismissSuggestions]
-key = "escape"
+[ai.providers.gemini]
+model = "gemini-2.5-flash"
+apiKeyEnv = "GEMINI_API_KEY"   # API keys come from env vars, never the config file
 ```
 
-Key names are matched against the Node.js [keypress](https://nodejs.org/api/readline.html#readlineemitkeypresseventsstream-interface) events.
+- **Local (ollama)**: no API key, runs offline. A code/instruction-capable model is recommended; very small general models produce poor commands.
+- **Cloud (gemini)**: set the API key in the environment variable named by `apiKeyEnv`.
+- **Keybinding**: the AI trigger defaults to Ctrl+G; override under `[bindings.generateCommand]`.
 
-### Alias Expansion
+The spec-based keybindings, `useAliases`, `useNerdFont`, and `maxSuggestions` options from inshellisense are unchanged.
 
-Inshellisense supports expanding aliases for bash/zsh shells. You can enable alias expansion in your config file:
+## Credits
 
-```toml
-useAliases = true
-```
+This project is a fork of **[inshellisense](https://github.com/microsoft/inshellisense)** by Microsoft, licensed under MIT. The autocomplete engine, spec runtime (via [@withfig/autocomplete](https://github.com/withfig/autocomplete)), PTY/terminal handling, and shell integrations are their work. This fork adds only the AI layer (`src/runtime/ai/`, the Ctrl+G trigger, and prompt/provider plumbing).
 
-### NerdFonts
+If you want plain spec-based autocomplete without the AI additions, use the upstream project directly.
 
-If you are using a [NerdFont](https://www.nerdfonts.com/) patched font, you can enable the NerdFonts support in your config file:
+## License
 
-```toml
-useNerdFont = true
-```
-
-### Max Suggestions
-
-You can change the maximum number of suggestions displayed in the autocomplete list at one time in your config file:
-
-
-```toml
-maxSuggestions = 10
-```
-
-
-## Unsupported Specs
-
-Specs for the `az`, `gcloud`, & `aws` CLIs are not supported in inshellisense due to their large size.
-
-## Contributing
-
-This project welcomes contributions and suggestions. Most contributions require you to agree to a
-Contributor License Agreement (CLA) declaring that you have the right to, and actually do, grant us
-the rights to use your contribution. For details, visit https://cla.opensource.microsoft.com.
-
-When you submit a pull request, a CLA bot will automatically determine whether you need to provide
-a CLA and decorate the PR appropriately (e.g., status check, comment). Simply follow the instructions
-provided by the bot. You will only need to do this once across all repos using our CLA.
-
-This project has adopted the [Microsoft Open Source Code of Conduct](https://opensource.microsoft.com/codeofconduct/).
-For more information see the [Code of Conduct FAQ](https://opensource.microsoft.com/codeofconduct/faq/) or
-contact [opencode@microsoft.com](mailto:opencode@microsoft.com) with any additional questions or comments.
-
-## Trademarks
-
-This project may contain trademarks or logos for projects, products, or services. Authorized use of Microsoft
-trademarks or logos is subject to and must follow
-[Microsoft's Trademark & Brand Guidelines](https://www.microsoft.com/en-us/legal/intellectualproperty/trademarks/usage/general).
-Use of Microsoft trademarks or logos in modified versions of this project must not cause confusion or imply Microsoft sponsorship.
-Any use of third-party trademarks or logos are subject to those third-party's policies.
+MIT — see [LICENSE](LICENSE). Original work (c) Microsoft Corporation; fork additions (c) Jaesol Shin.
