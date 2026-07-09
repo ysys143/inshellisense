@@ -6,3 +6,5 @@ tui-traces/
 .idea/
 .vscode/
 pkg/
+.local/
+.omc/

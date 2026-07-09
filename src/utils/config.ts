@@ -19,6 +19,19 @@ type Binding = {
   key: string;
 };
 
+type AiProviderConfig = {
+  baseUrl?: string;
+  model?: string;
+  apiKeyEnv?: string;
+};
+
+type AiConfig = {
+  enabled: boolean;
+  provider: string;
+  timeoutMs?: number;
+  providers?: { [name: string]: AiProviderConfig };
+};
+
 type Config = {
   bindings: {
     nextSuggestion: Binding;
@@ -32,6 +45,7 @@ type Config = {
   useAliases: boolean;
   useNerdFont: boolean;
   maxSuggestions?: number;
+  ai?: AiConfig;
 };
 
 const bindingSchema: JSONSchemaType<Binding> = {
@@ -87,6 +101,29 @@ const configSchema = {
       nullable: true,
       default: 5,
     },
+    ai: {
+      type: "object",
+      nullable: true,
+      properties: {
+        enabled: { type: "boolean", nullable: true },
+        provider: { type: "string", nullable: true },
+        timeoutMs: { type: "number", nullable: true },
+        providers: {
+          type: "object",
+          nullable: true,
+          additionalProperties: {
+            type: "object",
+            properties: {
+              baseUrl: { type: "string", nullable: true },
+              model: { type: "string", nullable: true },
+              apiKeyEnv: { type: "string", nullable: true },
+            },
+            additionalProperties: false,
+          },
+        },
+      },
+      additionalProperties: false,
+    },
   },
   additionalProperties: false,
 };
@@ -140,6 +177,7 @@ export const loadConfig = async (program: Command) => {
         useAliases: config.useAliases ?? false,
         useNerdFont: config?.useNerdFont ?? false,
         maxSuggestions: config?.maxSuggestions ?? 5,
+        ai: config?.ai ?? globalConfig.ai,
       };
     }
   }
