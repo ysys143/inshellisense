@@ -204,6 +204,22 @@ export class SuggestionManager {
       this.#aiPending = false;
     }
 
+    // AI result: accept with tab OR enter, replacing the whole natural-language line.
+    // Enter accepts (does not run) since the line is natural language, not a command.
+    // Handled before the enter-clears-command logic below so the replacement survives.
+    if (this.#aiActive && this.#suggestBlob) {
+      const acceptTab = name == acceptKey && shift == !!acceptShift && ctrl == !!acceptCtrl;
+      if (acceptTab || name == "return") {
+        const insert = this.#suggestBlob.suggestions.at(this.#activeSuggestionIdx)?.insertValue;
+        if (insert != null) {
+          const width = wcswidth(this.#term.getCommandState().commandText ?? "");
+          this.#term.write(applyReplacement({ backspaceCount: width, insertText: insert }));
+        }
+        this.#aiActive = false;
+        return true;
+      }
+    }
+
     if (name == "return") {
       this.#term.clearCommand(); // clear the current command on enter
     }
@@ -230,22 +246,11 @@ export class SuggestionManager {
       if (suggestion == null || this.#suggestBlob?.suggestions.length == 0) {
         return false;
       }
-      if (this.#aiActive) {
-        // AI result: replace the entire natural-language line with the generated command.
-        const insert = suggestion.insertValue;
-        if (insert == null) {
-          return false; // error blob has no insertValue -> nothing to accept
-        }
-        const width = wcswidth(this.#term.getCommandState().commandText ?? "");
-        this.#term.write(applyReplacement({ backspaceCount: width, insertText: insert }));
-        this.#aiActive = false;
-      } else {
-        const action = calculateReplacement(this.#suggestBlob?.activeToken, suggestion);
-        if (action == null) {
-          return false;
-        }
-        this.#term.write(applyReplacement(action));
+      const action = calculateReplacement(this.#suggestBlob?.activeToken, suggestion);
+      if (action == null) {
+        return false;
       }
+      this.#term.write(applyReplacement(action));
     } else if (name == "return" || (name == "c" && ctrl)) {
       this.#term.clearCommand();
       return false;

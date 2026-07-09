@@ -22,6 +22,9 @@ test.describe("[ai] success", () => {
 
     terminal.keyPress("g", { ctrl: true }); // Ctrl+G
     await expect(terminal.getByText("du -sh *", { strict: false })).toBeVisible();
+
+    terminal.write("\r"); // Enter accepts the AI suggestion (replaces the line, does not run it)
+    await expect(terminal.getByText("list files by size", { strict: false })).not.toBeVisible();
   });
 });
 
