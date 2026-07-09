@@ -30,7 +30,7 @@ export type ChatMessage = { role: "system" | "user" | "assistant"; content: stri
 // that small models otherwise ignore.
 export const buildMessages = (req: NLRequest): ChatMessage[] => {
   const bsdHint = req.env.includes("darwin") ? " Target macOS/BSD: avoid GNU-only flags (ps has no --sort; use `ps aux | sort` or `top -o`)." : "";
-  const system = `You translate a natural-language request into ONE shell command for this environment: ${req.env}.${bsdHint} Reply with only the command line: no prose, no markdown, no code fences, no alternatives. Exactly one line.`;
+  const system = `Translate the request into ONE runnable shell command for this environment: ${req.env}.${bsdHint} The request may be natural language in any language (including Korean), or a bare tool/service/domain name — always output the full command that accomplishes it (a service or domain name means the command that queries it, e.g. via curl). Never echo the input back unchanged. Reply with only the command line: no prose, no markdown, no code fences, no alternatives. Exactly one line.`;
   return [
     { role: "system", content: system },
     { role: "user", content: "list files by size" },
@@ -43,6 +43,8 @@ export const buildMessages = (req: NLRequest): ChatMessage[] => {
     { role: "assistant", content: "pwd | pbcopy" },
     { role: "user", content: "top processes by memory" },
     { role: "assistant", content: "top -o mem" },
+    { role: "user", content: "ifconfig.me" },
+    { role: "assistant", content: "curl ifconfig.me" },
     { role: "user", content: `[cwd: ${req.cwd}] ${req.input}` },
   ];
 };
