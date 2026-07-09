@@ -3,6 +3,7 @@
 
 import { AIProvider } from "./provider.js";
 import { GeminiProvider } from "./gemini.js";
+import { StubProvider } from "./stub.js";
 import { getConfig } from "../../utils/config.js";
 
 export { AIProvider, NLRequest } from "./provider.js";
@@ -11,6 +12,10 @@ export { AIProvider, NLRequest } from "./provider.js";
 // but the switch is the single extension point for OpenAI-compatible providers
 // (GLM/Kimi/Alibaba/ollama/mlx) which will share one adapter implementation.
 export const getAIProvider = (): AIProvider => {
+  // Test override: deterministic provider, no config/network required.
+  if (process.env.ISTERM_AI_PROVIDER === "stub") {
+    return new StubProvider();
+  }
   const ai = getConfig().ai;
   if (!ai?.enabled) {
     throw new Error("AI is disabled. Set `enabled = true` under [ai] in your inshellisense config.");

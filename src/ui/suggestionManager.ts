@@ -10,6 +10,10 @@ import { Shell } from "../utils/shell.js";
 import log from "../utils/log.js";
 import { getConfig } from "../utils/config.js";
 import { calculateReplacement, applyReplacement } from "../runtime/replacement.js";
+import { getAIProvider } from "../runtime/ai/index.js";
+import { collectEnv } from "../runtime/ai/prompt.js";
+import { SuggestionIcons } from "../runtime/suggestion.js";
+import { wcswidth } from "../utils/unicode.js";
 
 const getMaxSuggestions = () => getConfig().maxSuggestions ?? 5;
 const suggestionWidth = 40;
@@ -29,6 +33,16 @@ type KeyPress = {
   shift: boolean;
 };
 
+const aiSuggestion = (name: string, insertValue: string | undefined): Suggestion => ({
+  name,
+  allNames: [name],
+  icon: SuggestionIcons.Special,
+  priority: 100,
+  type: "special",
+  insertValue,
+  description: "AI",
+});
+
 export class SuggestionManager {
   #term: ISTerm;
   #command: string;
@@ -37,6 +51,9 @@ export class SuggestionManager {
   #shell: Shell;
   #hideSuggestions: boolean = false;
   #abortController?: AbortController;
+  #aiPending: boolean = false;
+  #aiActive: boolean = false;
+  #llmAbortController?: AbortController;
 
   constructor(terminal: ISTerm, shell: Shell) {
     this.#term = terminal;
@@ -47,6 +64,7 @@ export class SuggestionManager {
   }
 
   private async _loadSuggestions(): Promise<void> {
+    if (this.#aiPending) return; // don't let spec suggestions overwrite the AI loading/result blob
     this.#abortController?.abort();
     const commandState = this.#term.getCommandState();
     const commandText = commandState.commandText;
@@ -61,6 +79,7 @@ export class SuggestionManager {
     if (commandText == this.#command) {
       return;
     }
+    this.#aiActive = false; // command text changed -> spec path supersedes any AI result
     this.#abortController = new AbortController();
     try {
       const suggestionBlob = await getSuggestions(commandText, this.#term.cwd, this.#shell, this.#abortController.signal);
@@ -164,6 +183,27 @@ export class SuggestionManager {
 
   update(keyPress: KeyPress): boolean {
     const { name, shift, ctrl } = keyPress;
+    const {
+      dismissSuggestions: { key: dismissKey, shift: dismissShift, control: dismissCtrl },
+      acceptSuggestion: { key: acceptKey, shift: acceptShift, control: acceptCtrl },
+      nextSuggestion: { key: nextKey, shift: nextShift, control: nextCtrl },
+      previousSuggestion: { key: prevKey, shift: prevShift, control: prevCtrl },
+      generateCommand: { key: genKey, shift: genShift, control: genCtrl },
+    } = getConfig().bindings;
+
+    // AI trigger must run even when there are no spec suggestions (natural language),
+    // so it is handled before the `!this.#suggestBlob` early-return below.
+    if (name == genKey && shift == !!genShift && ctrl == !!genCtrl) {
+      void this._triggerAI();
+      return true;
+    }
+
+    // Any non-trigger key cancels an in-flight AI request (user kept typing).
+    if (this.#aiPending) {
+      this.#llmAbortController?.abort();
+      this.#aiPending = false;
+    }
+
     if (name == "return") {
       this.#term.clearCommand(); // clear the current command on enter
     }
@@ -176,16 +216,11 @@ export class SuggestionManager {
     if (!this.#suggestBlob) {
       return false;
     }
-    const {
-      dismissSuggestions: { key: dismissKey, shift: dismissShift, control: dismissCtrl },
-      acceptSuggestion: { key: acceptKey, shift: acceptShift, control: acceptCtrl },
-      nextSuggestion: { key: nextKey, shift: nextShift, control: nextCtrl },
-      previousSuggestion: { key: prevKey, shift: prevShift, control: prevCtrl },
-    } = getConfig().bindings;
 
     if (name == dismissKey && shift == !!dismissShift && ctrl == !!dismissCtrl) {
       this.#suggestBlob = undefined;
       this.#hideSuggestions = true;
+      this.#aiActive = false;
     } else if (name == prevKey && shift == !!prevShift && ctrl == !!prevCtrl) {
       this.#activeSuggestionIdx = Math.max(0, this.#activeSuggestionIdx - 1);
     } else if (name == nextKey && shift == !!nextShift && ctrl == !!nextCtrl) {
@@ -195,11 +230,22 @@ export class SuggestionManager {
       if (suggestion == null || this.#suggestBlob?.suggestions.length == 0) {
         return false;
       }
-      const action = calculateReplacement(this.#suggestBlob?.activeToken, suggestion);
-      if (action == null) {
-        return false;
+      if (this.#aiActive) {
+        // AI result: replace the entire natural-language line with the generated command.
+        const insert = suggestion.insertValue;
+        if (insert == null) {
+          return false; // error blob has no insertValue -> nothing to accept
+        }
+        const width = wcswidth(this.#term.getCommandState().commandText ?? "");
+        this.#term.write(applyReplacement({ backspaceCount: width, insertText: insert }));
+        this.#aiActive = false;
+      } else {
+        const action = calculateReplacement(this.#suggestBlob?.activeToken, suggestion);
+        if (action == null) {
+          return false;
+        }
+        this.#term.write(applyReplacement(action));
       }
-      this.#term.write(applyReplacement(action));
     } else if (name == "return" || (name == "c" && ctrl)) {
       this.#term.clearCommand();
       return false;
@@ -208,5 +254,56 @@ export class SuggestionManager {
     }
     log.debug({ msg: "handled keypress", ...keyPress });
     return true;
+  }
+
+  // Fire-and-forget from update() (keypress is sync). Sets a loading blob, calls the
+  // provider, then swaps in the result/error blob. Re-render is driven by term.noop().
+  private async _triggerAI(): Promise<void> {
+    const commandText = this.#term.getCommandState().commandText;
+    if (!commandText) return;
+
+    this.#llmAbortController?.abort();
+    const controller = new AbortController();
+    this.#llmAbortController = controller;
+    this.#aiPending = true;
+    this.#aiActive = false;
+    this.#command = commandText; // keep _loadSuggestions from recomputing over the AI blob
+    this.#activeSuggestionIdx = 0;
+    this.#suggestBlob = { suggestions: [aiSuggestion("AI 생각 중...", undefined)] };
+    this.#term.noop();
+
+    // timedOut distinguishes a timeout (show error) from a user cancel (stay silent),
+    // since both abort the same controller. AbortSignal.any isn't in the type defs.
+    const timeoutMs = getConfig().ai?.timeoutMs ?? 8000;
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, timeoutMs);
+
+    try {
+      const provider = getAIProvider();
+      const cmd = await provider.generateCommand(
+        { input: commandText, cwd: this.#term.cwd, env: collectEnv(this.#shell), shell: this.#shell },
+        controller.signal,
+      );
+      clearTimeout(timer);
+      this.#aiPending = false;
+      this.#aiActive = true;
+      this.#activeSuggestionIdx = 0;
+      this.#suggestBlob = { suggestions: [aiSuggestion(cmd, cmd)] };
+      this.#term.noop();
+    } catch (e) {
+      clearTimeout(timer);
+      this.#aiPending = false;
+      if (controller.signal.aborted && !timedOut) {
+        return; // user cancelled by typing; let normal flow resume
+      }
+      this.#aiActive = true;
+      const msg = timedOut ? "timeout" : e instanceof Error ? e.message : String(e);
+      this.#activeSuggestionIdx = 0;
+      this.#suggestBlob = { suggestions: [aiSuggestion(`[AI] error: ${truncateText(msg, 40)}`, undefined)] };
+      this.#term.noop();
+    }
   }
 }

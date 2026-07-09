@@ -38,6 +38,7 @@ type Config = {
     previousSuggestion: Binding;
     dismissSuggestions: Binding;
     acceptSuggestion: Binding;
+    generateCommand: Binding;
   };
   specs: {
     path: string[];
@@ -77,6 +78,7 @@ const configSchema = {
         previousSuggestion: bindingSchema,
         dismissSuggestions: bindingSchema,
         acceptSuggestion: bindingSchema,
+        generateCommand: bindingSchema,
       },
     },
     specs: {
@@ -141,6 +143,7 @@ let globalConfig: Config = {
     previousSuggestion: { key: "up" },
     acceptSuggestion: { key: "tab" },
     dismissSuggestions: { key: "escape" },
+    generateCommand: { key: "g", control: true },
   },
   specs: {
     path: [],
@@ -170,6 +173,7 @@ export const loadConfig = async (program: Command) => {
           previousSuggestion: config?.bindings?.previousSuggestion ?? globalConfig.bindings.previousSuggestion,
           acceptSuggestion: config?.bindings?.acceptSuggestion ?? globalConfig.bindings.acceptSuggestion,
           dismissSuggestions: config?.bindings?.dismissSuggestions ?? globalConfig.bindings.dismissSuggestions,
+          generateCommand: config?.bindings?.generateCommand ?? globalConfig.bindings.generateCommand,
         },
         specs: {
           path: [...(config?.specs?.path ?? [])],
