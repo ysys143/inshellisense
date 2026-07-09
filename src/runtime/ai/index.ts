@@ -4,6 +4,7 @@
 import { AIProvider } from "./provider.js";
 import { GeminiProvider } from "./gemini.js";
 import { StubProvider } from "./stub.js";
+import { OpenAICompatibleProvider } from "./openai-compatible.js";
 import { getConfig } from "../../utils/config.js";
 
 export { AIProvider, NLRequest } from "./provider.js";
@@ -30,6 +31,12 @@ export const getAIProvider = (): AIProvider => {
       }
       const model = cfg.model ?? process.env.GEMINI_MODEL ?? "gemini-2.5-flash";
       return new GeminiProvider({ model, apiKey });
+    }
+    case "ollama": {
+      const cfg = ai.providers?.ollama ?? {};
+      const baseUrl = cfg.baseUrl ?? "http://localhost:11434/v1";
+      const model = cfg.model ?? "gemma4:e2b";
+      return new OpenAICompatibleProvider("ollama", { baseUrl, model });
     }
     default:
       throw new Error(`unknown AI provider: '${ai.provider}'`);
