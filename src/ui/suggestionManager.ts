@@ -222,8 +222,10 @@ export class SuggestionManager {
       if (acceptTab || name == "return") {
         const insert = this.#suggestBlob.suggestions.at(this.#activeSuggestionIdx)?.insertValue;
         if (insert != null) {
-          const width = wcswidth(this.#term.getCommandState().commandText ?? "");
-          this.#term.write(applyReplacement({ backspaceCount: width, insertText: insert }));
+          // Backspace deletes one grapheme at a time (a Korean char is a single delete,
+          // not two), so count code points — NOT display width, which over-deletes CJK.
+          const line = this.#term.getCommandState().commandText ?? "";
+          this.#term.write(applyReplacement({ backspaceCount: [...line].length, insertText: insert }));
         }
         this.#aiActive = false;
         return true;
