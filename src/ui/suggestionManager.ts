@@ -269,7 +269,7 @@ export class SuggestionManager {
     this.#aiActive = false;
     this.#command = commandText; // keep _loadSuggestions from recomputing over the AI blob
     this.#activeSuggestionIdx = 0;
-    this.#suggestBlob = { suggestions: [aiSuggestion("AI 생각 중...", undefined)] };
+    this.#suggestBlob = { suggestions: [aiSuggestion("Generating...", undefined)] };
     this.#term.noop();
 
     // timedOut distinguishes a timeout (show error) from a user cancel (stay silent),
