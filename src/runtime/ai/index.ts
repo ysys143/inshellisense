@@ -29,7 +29,7 @@ export const getAIProvider = (): AIProvider => {
       if (!apiKey) {
         throw new Error(`missing API key: environment variable '${apiKeyEnv}' is not set`);
       }
-      const model = cfg.model ?? process.env.GEMINI_MODEL ?? "gemini-2.5-flash";
+      const model = cfg.model ?? process.env.GEMINI_MODEL ?? "gemini-flash-lite-latest";
       return new GeminiProvider({ model, apiKey });
     }
     case "ollama": {

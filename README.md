@@ -79,7 +79,7 @@ baseUrl = "http://localhost:11434/v1"
 model = "gemma4:e2b"
 
 [ai.providers.gemini]
-model = "gemini-2.5-flash"
+model = "gemini-flash-lite-latest"
 apiKeyEnv = "GEMINI_API_KEY"   # API keys come from env vars, never the config file
 ```
 
