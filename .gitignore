@@ -8,3 +8,4 @@ tui-traces/
 pkg/
 .local/
 .omc/
+.DS_Store
