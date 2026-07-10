@@ -10,6 +10,10 @@ import { Shell } from "../utils/shell.js";
 import log from "../utils/log.js";
 import { getConfig } from "../utils/config.js";
 import { calculateReplacement, applyReplacement } from "../runtime/replacement.js";
+import { getAIProvider } from "../runtime/ai/index.js";
+import { collectEnv } from "../runtime/ai/prompt.js";
+import { SuggestionIcons } from "../runtime/suggestion.js";
+import { wcswidth } from "../utils/unicode.js";
 
 const getMaxSuggestions = () => getConfig().maxSuggestions ?? 5;
 const suggestionWidth = 40;
@@ -29,6 +33,15 @@ type KeyPress = {
   shift: boolean;
 };
 
+const aiSuggestion = (name: string, insertValue: string | undefined): Suggestion => ({
+  name,
+  allNames: [name],
+  icon: SuggestionIcons.Special,
+  priority: 100,
+  type: "special",
+  insertValue,
+});
+
 export class SuggestionManager {
   #term: ISTerm;
   #command: string;
@@ -37,6 +50,9 @@ export class SuggestionManager {
   #shell: Shell;
   #hideSuggestions: boolean = false;
   #abortController?: AbortController;
+  #aiPending: boolean = false;
+  #aiActive: boolean = false;
+  #llmAbortController?: AbortController;
 
   constructor(terminal: ISTerm, shell: Shell) {
     this.#term = terminal;
@@ -47,6 +63,7 @@ export class SuggestionManager {
   }
 
   private async _loadSuggestions(): Promise<void> {
+    if (this.#aiPending) return; // don't let spec suggestions overwrite the AI loading/result blob
     this.#abortController?.abort();
     const commandState = this.#term.getCommandState();
     const commandText = commandState.commandText;
@@ -61,6 +78,7 @@ export class SuggestionManager {
     if (commandText == this.#command) {
       return;
     }
+    this.#aiActive = false; // command text changed -> spec path supersedes any AI result
     this.#abortController = new AbortController();
     try {
       const suggestionBlob = await getSuggestions(commandText, this.#term.cwd, this.#shell, this.#abortController.signal);
@@ -86,31 +104,37 @@ export class SuggestionManager {
     return renderBox(truncateMultilineText(description, descriptionWidth - borderWidth, descriptionHeight), descriptionWidth);
   }
 
-  private _renderSuggestions(suggestions: Suggestion[], activeSuggestionIdx: number) {
+  private _renderSuggestions(suggestions: Suggestion[], activeSuggestionIdx: number, width: number = suggestionWidth) {
     return renderBox(
       suggestions.map((suggestion, idx) => {
         const suggestionText = `${suggestion.icon} ${suggestion.name}`;
-        const truncatedSuggestion = truncateText(suggestionText, suggestionWidth - 2);
+        const truncatedSuggestion = truncateText(suggestionText, width - 2);
         return idx == activeSuggestionIdx ? chalk.bgHex(activeSuggestionBackgroundColor)(truncatedSuggestion) : truncatedSuggestion;
       }),
-      suggestionWidth,
+      width,
     );
   }
 
-  private _calculatePadding(description: string): { padding: number; swapDescription: boolean } {
+  private _calculatePadding(description: string, width: number = suggestionWidth): { padding: number; swapDescription: boolean } {
     const wrappedPadding = this.#term.getCursorState().cursorX % this.#term.cols;
-    const maxPadding = description.length !== 0 ? this.#term.cols - suggestionWidth - descriptionWidth : this.#term.cols - suggestionWidth;
+    const maxPadding = description.length !== 0 ? this.#term.cols - width - descriptionWidth : this.#term.cols - width;
     const swapDescription = wrappedPadding > maxPadding && description.length !== 0;
     const swappedPadding = swapDescription ? Math.max(wrappedPadding - descriptionWidth, 0) : wrappedPadding;
     const padding = Math.min(Math.min(wrappedPadding, swappedPadding), maxPadding);
     return { padding, swapDescription };
   }
 
-  private _calculateRowPadding(padding: number, swapDescription: boolean, suggestionContent?: string, descriptionContent?: string): number {
+  private _calculateRowPadding(
+    padding: number,
+    swapDescription: boolean,
+    suggestionContent?: string,
+    descriptionContent?: string,
+    width: number = suggestionWidth,
+  ): number {
     if (swapDescription) {
       return descriptionContent == null ? padding + descriptionWidth : padding;
     }
-    return suggestionContent == null ? padding + suggestionWidth : padding;
+    return suggestionContent == null ? padding + width : padding;
   }
 
   async exec(): Promise<void> {
@@ -128,7 +152,12 @@ export class SuggestionManager {
     const pagedSuggestions = suggestions.filter((_, idx) => idx < page * maxSuggestions && idx >= (page - 1) * maxSuggestions);
     const activePagedSuggestionIndex = this.#activeSuggestionIdx % maxSuggestions;
     const activeDescription = pagedSuggestions.at(activePagedSuggestionIndex)?.description || argumentDescription || "";
-    const { swapDescription, padding } = this._calculatePadding(activeDescription);
+    // AI results are a single, often short command -> size the box to its content
+    // instead of the fixed suggestionWidth (which suits multi-item spec lists).
+    const sw = this.#aiActive
+      ? Math.min(suggestionWidth, Math.max(0, ...pagedSuggestions.map((s) => wcswidth(`${s.icon} ${s.name}`))) + borderWidth)
+      : suggestionWidth;
+    const { swapDescription, padding } = this._calculatePadding(activeDescription, sw);
 
     if (suggestions.length <= this.#activeSuggestionIdx) {
       this.#activeSuggestionIdx = Math.max(suggestions.length - 1, 0);
@@ -141,7 +170,7 @@ export class SuggestionManager {
       return [];
     }
     const descriptionUI = this._renderDescription(activeDescription);
-    const suggestionUI = this._renderSuggestions(pagedSuggestions, activePagedSuggestionIndex);
+    const suggestionUI = this._renderSuggestions(pagedSuggestions, activePagedSuggestionIndex, sw);
     const ui = [];
     const maxRows = Math.max(descriptionUI.length, suggestionUI.length);
     for (let i = 0; i < maxRows; i++) {
@@ -151,11 +180,11 @@ export class SuggestionManager {
           : [suggestionUI[i], descriptionUI[i]];
 
       const data = swapDescription ? (descriptionUIRow ?? "") + (suggestionUIRow ?? "") : (suggestionUIRow ?? "") + (descriptionUIRow ?? "");
-      const rowPadding = this._calculateRowPadding(padding, swapDescription, suggestionUIRow, descriptionUIRow);
+      const rowPadding = this._calculateRowPadding(padding, swapDescription, suggestionUIRow, descriptionUIRow, sw);
 
       ui.push({
         startX: rowPadding,
-        length: (suggestionUIRow == null ? 0 : suggestionWidth) + (descriptionUIRow == null ? 0 : descriptionWidth),
+        length: (suggestionUIRow == null ? 0 : sw) + (descriptionUIRow == null ? 0 : descriptionWidth),
         data: data,
       });
     }
@@ -164,6 +193,45 @@ export class SuggestionManager {
 
   update(keyPress: KeyPress): boolean {
     const { name, shift, ctrl } = keyPress;
+    const {
+      dismissSuggestions: { key: dismissKey, shift: dismissShift, control: dismissCtrl },
+      acceptSuggestion: { key: acceptKey, shift: acceptShift, control: acceptCtrl },
+      nextSuggestion: { key: nextKey, shift: nextShift, control: nextCtrl },
+      previousSuggestion: { key: prevKey, shift: prevShift, control: prevCtrl },
+      generateCommand: { key: genKey, shift: genShift, control: genCtrl },
+    } = getConfig().bindings;
+
+    // AI trigger must run even when there are no spec suggestions (natural language),
+    // so it is handled before the `!this.#suggestBlob` early-return below.
+    if (name == genKey && shift == !!genShift && ctrl == !!genCtrl) {
+      void this._triggerAI();
+      return true;
+    }
+
+    // Any non-trigger key cancels an in-flight AI request (user kept typing).
+    if (this.#aiPending) {
+      this.#llmAbortController?.abort();
+      this.#aiPending = false;
+    }
+
+    // AI result: accept with tab OR enter, replacing the whole natural-language line.
+    // Enter accepts (does not run) since the line is natural language, not a command.
+    // Handled before the enter-clears-command logic below so the replacement survives.
+    if (this.#aiActive && this.#suggestBlob) {
+      const acceptTab = name == acceptKey && shift == !!acceptShift && ctrl == !!acceptCtrl;
+      if (acceptTab || name == "return") {
+        const insert = this.#suggestBlob.suggestions.at(this.#activeSuggestionIdx)?.insertValue;
+        if (insert != null) {
+          // Backspace deletes one grapheme at a time (a Korean char is a single delete,
+          // not two), so count code points — NOT display width, which over-deletes CJK.
+          const line = this.#term.getCommandState().commandText ?? "";
+          this.#term.write(applyReplacement({ backspaceCount: [...line].length, insertText: insert }));
+        }
+        this.#aiActive = false;
+        return true;
+      }
+    }
+
     if (name == "return") {
       this.#term.clearCommand(); // clear the current command on enter
     }
@@ -176,16 +244,11 @@ export class SuggestionManager {
     if (!this.#suggestBlob) {
       return false;
     }
-    const {
-      dismissSuggestions: { key: dismissKey, shift: dismissShift, control: dismissCtrl },
-      acceptSuggestion: { key: acceptKey, shift: acceptShift, control: acceptCtrl },
-      nextSuggestion: { key: nextKey, shift: nextShift, control: nextCtrl },
-      previousSuggestion: { key: prevKey, shift: prevShift, control: prevCtrl },
-    } = getConfig().bindings;
 
     if (name == dismissKey && shift == !!dismissShift && ctrl == !!dismissCtrl) {
       this.#suggestBlob = undefined;
       this.#hideSuggestions = true;
+      this.#aiActive = false;
     } else if (name == prevKey && shift == !!prevShift && ctrl == !!prevCtrl) {
       this.#activeSuggestionIdx = Math.max(0, this.#activeSuggestionIdx - 1);
     } else if (name == nextKey && shift == !!nextShift && ctrl == !!nextCtrl) {
@@ -208,5 +271,56 @@ export class SuggestionManager {
     }
     log.debug({ msg: "handled keypress", ...keyPress });
     return true;
+  }
+
+  // Fire-and-forget from update() (keypress is sync). Sets a loading blob, calls the
+  // provider, then swaps in the result/error blob. Re-render is driven by term.noop().
+  private async _triggerAI(): Promise<void> {
+    const commandText = this.#term.getCommandState().commandText;
+    if (!commandText) return;
+
+    this.#llmAbortController?.abort();
+    const controller = new AbortController();
+    this.#llmAbortController = controller;
+    this.#aiPending = true;
+    this.#aiActive = false;
+    this.#command = commandText; // keep _loadSuggestions from recomputing over the AI blob
+    this.#activeSuggestionIdx = 0;
+    this.#suggestBlob = { suggestions: [aiSuggestion("Generating...", undefined)] };
+    this.#term.noop();
+
+    // timedOut distinguishes a timeout (show error) from a user cancel (stay silent),
+    // since both abort the same controller. AbortSignal.any isn't in the type defs.
+    const timeoutMs = getConfig().ai?.timeoutMs ?? 8000;
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, timeoutMs);
+
+    try {
+      const provider = getAIProvider();
+      const cmd = await provider.generateCommand(
+        { input: commandText, cwd: this.#term.cwd, env: collectEnv(this.#shell), shell: this.#shell },
+        controller.signal,
+      );
+      clearTimeout(timer);
+      this.#aiPending = false;
+      this.#aiActive = true;
+      this.#activeSuggestionIdx = 0;
+      this.#suggestBlob = { suggestions: [aiSuggestion(cmd, cmd)] };
+      this.#term.noop();
+    } catch (e) {
+      clearTimeout(timer);
+      this.#aiPending = false;
+      if (controller.signal.aborted && !timedOut) {
+        return; // user cancelled by typing; let normal flow resume
+      }
+      this.#aiActive = true;
+      const msg = timedOut ? "timeout" : e instanceof Error ? e.message : String(e);
+      this.#activeSuggestionIdx = 0;
+      this.#suggestBlob = { suggestions: [aiSuggestion(`[AI] error: ${truncateText(msg, 40)}`, undefined)] };
+      this.#term.noop();
+    }
   }
 }

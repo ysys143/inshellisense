@@ -6,3 +6,6 @@ tui-traces/
 .idea/
 .vscode/
 pkg/
+.local/
+.omc/
+.DS_Store

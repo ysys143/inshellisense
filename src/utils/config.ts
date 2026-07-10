@@ -19,12 +19,26 @@ type Binding = {
   key: string;
 };
 
+type AiProviderConfig = {
+  baseUrl?: string;
+  model?: string;
+  apiKeyEnv?: string;
+};
+
+type AiConfig = {
+  enabled: boolean;
+  provider: string;
+  timeoutMs?: number;
+  providers?: { [name: string]: AiProviderConfig };
+};
+
 type Config = {
   bindings: {
     nextSuggestion: Binding;
     previousSuggestion: Binding;
     dismissSuggestions: Binding;
     acceptSuggestion: Binding;
+    generateCommand: Binding;
   };
   specs: {
     path: string[];
@@ -32,6 +46,7 @@ type Config = {
   useAliases: boolean;
   useNerdFont: boolean;
   maxSuggestions?: number;
+  ai?: AiConfig;
 };
 
 const bindingSchema: JSONSchemaType<Binding> = {
@@ -63,6 +78,7 @@ const configSchema = {
         previousSuggestion: bindingSchema,
         dismissSuggestions: bindingSchema,
         acceptSuggestion: bindingSchema,
+        generateCommand: bindingSchema,
       },
     },
     specs: {
@@ -87,6 +103,29 @@ const configSchema = {
       nullable: true,
       default: 5,
     },
+    ai: {
+      type: "object",
+      nullable: true,
+      properties: {
+        enabled: { type: "boolean", nullable: true },
+        provider: { type: "string", nullable: true },
+        timeoutMs: { type: "number", nullable: true },
+        providers: {
+          type: "object",
+          nullable: true,
+          additionalProperties: {
+            type: "object",
+            properties: {
+              baseUrl: { type: "string", nullable: true },
+              model: { type: "string", nullable: true },
+              apiKeyEnv: { type: "string", nullable: true },
+            },
+            additionalProperties: false,
+          },
+        },
+      },
+      additionalProperties: false,
+    },
   },
   additionalProperties: false,
 };
@@ -104,6 +143,7 @@ let globalConfig: Config = {
     previousSuggestion: { key: "up" },
     acceptSuggestion: { key: "tab" },
     dismissSuggestions: { key: "escape" },
+    generateCommand: { key: "g", control: true },
   },
   specs: {
     path: [],
@@ -133,6 +173,7 @@ export const loadConfig = async (program: Command) => {
           previousSuggestion: config?.bindings?.previousSuggestion ?? globalConfig.bindings.previousSuggestion,
           acceptSuggestion: config?.bindings?.acceptSuggestion ?? globalConfig.bindings.acceptSuggestion,
           dismissSuggestions: config?.bindings?.dismissSuggestions ?? globalConfig.bindings.dismissSuggestions,
+          generateCommand: config?.bindings?.generateCommand ?? globalConfig.bindings.generateCommand,
         },
         specs: {
           path: [...(config?.specs?.path ?? [])],
@@ -140,6 +181,7 @@ export const loadConfig = async (program: Command) => {
         useAliases: config.useAliases ?? false,
         useNerdFont: config?.useNerdFont ?? false,
         maxSuggestions: config?.maxSuggestions ?? 5,
+        ai: config?.ai ?? globalConfig.ai,
       };
     }
   }
